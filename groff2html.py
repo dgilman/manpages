@@ -185,7 +185,7 @@ def tokenizer(fd, encoding=None):
             # driver anyway
             if cmd == 'xX':
                 end = LINE.match(buf)
-                args.append(buf[:end.end()])
+                args.append(buf[:end.end() - 1]) # don't pass newline
                 buf = buf[end.end():]
 
             if state == CMD:
@@ -428,7 +428,7 @@ class TextOutput(Outputter):
             (prev_line // self.vert_motion))
 
     def xX(self, args):
-        if args[0] in ('devtag:.col 1\n', 'devtag:.eo.h\n'):
+        if args[0] in ('devtag:.col 1', 'devtag:.eo.h'):
             self.reset_column = True
         return ''
 
