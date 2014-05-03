@@ -454,12 +454,12 @@ class TextOutput(Outputter):
     def V(self, args):
         if args[0] % self.vert_motion != 0:
             raise ParseError('can only move multiples of vert_motion')
-        prev_line = self.line
+        newlines = '\n'*((args[0] // self.vert_motion) -
+            (self.line // self.vert_motion))
+        if len(newlines) != 0:
+            self.text_ptr = 0
         self.line = args[0]
-        self.insert_ptr = 0
-        self.text_ptr = 0
-        return '\n'*((args[0] // self.vert_motion) -
-            (prev_line // self.vert_motion))
+        return newlines
 
     def xX(self, args):
         return ''
