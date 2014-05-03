@@ -91,7 +91,6 @@ def tokenizer(fd, encoding=None):
             grow = False
         if len(buf) == 0:
             break
-        #print(buf.split('\n')[0])
 
         if state == CMD:
             # comment
@@ -330,28 +329,55 @@ class TextOutput(Outputter):
         self.resolution = None
         self.horiz_motion = None
         self.vert_motion = None
+
         self.page = None
+
         self.device_font = None
         self.font = None
         self.font_size = None
-        self.horizontal_increment = 0
+
+        # where to insert next char
+        self.insert_ptr = 0
+        # where last char was inserted
+        self.text_ptr = 0
+
         self.line = 0
-        self.reset_column = False
+
+    # first, figure out if any padding is needed with space()
+    # next, print chars
+    # next, always increment text_ptr by the size of what was printed
+    # but, if it's a t:
+    #   increment insert_ptr
+    # if it's a N, C or similar:
+    #   do not increment insert_ptr, it will be done with a following h
+
+    def _space(self):
+        if self.text_ptr < self.insert_ptr:
+            rval = ' '*(self.insert_ptr - self.text_ptr)
+            self.text_ptr = self.insert_ptr
+            return rval
+        elif self.text_ptr == self.insert_ptr:
+            return ''
+        else:
+            raise ParseError('Driver can\'t seek backwards in line')
 
     def t(self, args):
-        self.horizontal_increment = 0
-        return args[0]
+        rval = self._space() + args[0]
+        self.text_ptr += len(args[0])
+        self.insert_ptr += len(args[0])
+        return rval
 
     def h(self, args):
         if args[0] % self.horiz_motion != 0:
             raise ParseError('can only move multiples of horiz_motion')
-        # we can't actually seek backwards, but not outputting any more
-        # spaces does the trick
-        if self.reset_column:
-            self.reset_column = False
-            return ''
-        return ' '*((args[0] // self.horiz_motion) - self.horizontal_increment)
-    H = h
+        self.insert_ptr += (args[0] // self.horiz_motion)
+        return ''
+
+    def H(self, args):
+        if args[0] % self.horiz_motion != 0:
+            raise ParseError('can only move multiples of horiz_motion')
+        self.insert_ptr = (args[0] // self.horiz_motion)
+        return ''
 
     def noop(self, args):
         return ''
@@ -364,20 +390,24 @@ class TextOutput(Outputter):
     xt = noop
 
     def N(self, args):
-        self.horizontal_increment = 1
+        padding = self._space()
         if args[0] > 32 and args[0] < 127:
-            return chr(args[0])
+            char = chr(args[0])
         elif args[0] > 160 and args[0] < 256:
-            return bytes((args[0],)).decode('ISO-8859-1')
+            char = bytes((args[0],)).decode('ISO-8859-1')
         else:
             raise ParseError('N this big is not supported yet')
+        self.text_ptr += len(char)
+        return padding + char
 
     def C(self, args):
         if args[0] not in special_chars:
             raise ParseError('Character {0} not supported for C yet'\
                 .format(args[0]))
-        self.horizontal_increment = len(special_chars[args[0]])
-        return special_chars[args[0]]
+        char = special_chars[args[0]]
+        padding = self._space()
+        self.text_ptr += len(char)
+        return padding + char
 
     def xT(self, args):
         if not self.initial_typesetter:
@@ -400,7 +430,9 @@ class TextOutput(Outputter):
 
     def p(self, args):
         self.page = args[0]
-        self.line = 0
+        # this fixes the stray newline at the top of the file
+        if self.page != 1:
+            self.line = 0
         return ''
 
     def xf(self, args):
@@ -424,15 +456,16 @@ class TextOutput(Outputter):
             raise ParseError('can only move multiples of vert_motion')
         prev_line = self.line
         self.line = args[0]
+        self.insert_ptr = 0
+        self.text_ptr = 0
         return '\n'*((args[0] // self.vert_motion) -
             (prev_line // self.vert_motion))
 
     def xX(self, args):
-        if args[0] in ('devtag:.col 1', 'devtag:.eo.h'):
-            self.reset_column = True
         return ''
 
     def xs(self, args):
+        return '\n'
         raise StopIteration()
 
 
