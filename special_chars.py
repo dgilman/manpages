@@ -5,6 +5,12 @@
 # recreate it with:
 # $ cat uniglyph_*.cpp | python create_special_chars.py > special_chars.py
 chars = {
+'\\\\': '\\',
+'\\´': '´',
+'\\`': '`',
+'\\-': '-',
+'\\.': '.',
+'\\e': '\\',
 '!': '\u0021',
 'dq': '\u0022',
 'sh': '\u0023',

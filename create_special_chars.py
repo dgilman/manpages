@@ -28,6 +28,15 @@ def main():
     print('# $ cat uniglyph_*.cpp | python create_special_chars.py > '
         'special_chars.py')
     print('chars = {')
+    # these are special chars sometimes emitted, see
+    # DESCRIPTION in groff_char(7)
+    # `\\', `\´', `\`', `\-', `\.', and `\e'
+    print("'\\\\\\\\': '\\\\',")
+    print("'\\\\´': '´',")
+    print("'\\\\`': '`',")
+    print("'\\\\-': '-',")
+    print("'\\\\.': '.',")
+    print("'\\\\e': '\\\\',")
     for line in sys.stdin:
         if line[0:2] == '//':
             continue
