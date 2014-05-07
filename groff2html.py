@@ -192,12 +192,12 @@ def tokenizer(fd, encoding=None):
                 cmd = ''
                 args = []
 
-LINK_FONT = 0
+NORMAL_FONT = 0
 BOLD_FONT = 1
 UNDERLINE_FONT = 2
 
 device_font_map = {
-    ('1', 'R'): LINK_FONT,
+    ('1', 'R'): NORMAL_FONT,
     ('3', 'B'): BOLD_FONT,
     ('2', 'I'): UNDERLINE_FONT
 }
@@ -207,14 +207,168 @@ class Outputter():
         self.fd = fd
 
     def __iter__(self):
-        for cmd, args in tokenizer(fd):
+        for cmd, args in tokenizer(self.fd):
             if hasattr(self, cmd):
                 yield getattr(self, cmd)(args)
             else:
                 raise NotImplemented(cmd)
 
+class HTMLOutput(Outputter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.initial_typesetter = None
+        self.resolution = None
+        self.horiz_motion = None
+        self.vert_motion = None
+
+        self.page = None
+
+        self.device_font = None
+        self.font = None
+        self.font_size = None
+
+        # where to insert next char
+        self.insert_ptr = 0
+        # where last char was inserted
+        self.text_ptr = 0
+
+        self.line = 0
+
+    # first, figure out if any padding is needed with space()
+    # next, print chars
+    # next, always increment text_ptr by the size of what was printed
+    # but, if it's a t:
+    #   increment insert_ptr
+    # if it's a N, C or similar:
+    #   do not increment insert_ptr, it will be done with a following h
+
+    def _space(self):
+        if self.text_ptr < self.insert_ptr:
+            rval = ' '*(self.insert_ptr - self.text_ptr)
+            self.text_ptr = self.insert_ptr
+            return rval
+        elif self.text_ptr == self.insert_ptr:
+            return ''
+        else:
+            raise ParseError('Driver can\'t seek backwards in line')
+
+    def t(self, args):
+        rval = self._space() + args[0]
+        self.text_ptr += len(args[0])
+        self.insert_ptr += len(args[0])
+        return rval
+
+    def h(self, args):
+        if args[0] % self.horiz_motion != 0:
+            raise ParseError('can only move multiples of horiz_motion')
+        self.insert_ptr += (args[0] // self.horiz_motion)
+        return ''
+
+    def H(self, args):
+        if args[0] % self.horiz_motion != 0:
+            raise ParseError('can only move multiples of horiz_motion')
+        self.insert_ptr = (args[0] // self.horiz_motion)
+        return ''
+
+    def noop(self, args):
+        return ''
+    n = noop
+    xi = noop
+    xF = noop
+    md = noop
+    DFd = noop
+    w = noop
+    xt = noop
+
+    def N(self, args):
+        padding = self._space()
+        if args[0] > 32 and args[0] < 127:
+            char = chr(args[0])
+        elif args[0] > 160 and args[0] < 256:
+            char = bytes((args[0],)).decode('ISO-8859-1')
+        else:
+            raise ParseError('N this big is not supported yet')
+        self.text_ptr += len(char)
+        return padding + char
+
+    def C(self, args):
+        if args[0] not in special_chars:
+            raise ParseError('Character {0} not supported for C yet'\
+                .format(args[0]))
+        char = special_chars[args[0]]
+        padding = self._space()
+        self.text_ptr += len(char)
+        return padding + char
+
+    def xT(self, args):
+        if not self.initial_typesetter:
+            if args[0] != 'utf8':
+                raise ParseError('Only the utf8 device is supported')
+            self.initial_typesetter = args[0]
+        else:
+            raise ParseError('Can\'t set the device twice')
+        return ''
+
+    def xr(self, args):
+        if not self.resolution:
+            self.resolution = args[0]
+            self.horiz_motion = args[1]
+            self.vert_motion = args[2]
+            self.line = self.vert_motion
+        else:
+            raise ParseError('Can\'t set the resolution twice')
+        return ''
+
+    def p(self, args):
+        self.page = args[0]
+        # this fixes the stray newline at the top of the file
+        if self.page != 1:
+            self.line = 0
+        return ''
+
+    def xf(self, args):
+        if (args[0], args[1]) not in device_font_map:
+            raise ParseError('We don\'t support that device font yet')
+        self.device_font = device_font_map[(args[0], args[1])]
+        return ''
+
+    def f(self, args):
+        rval = ''
+        if self.font and args[0] == 1:
+            rval = '</span>'
+        if args[0] == 2:
+            rval = '<span class="literal">'
+        if args[0] == 3:
+            rval = '<span class="heading">'
+        self.font = args[0]
+        return rval
+
+    def s(self, args):
+        if self.font_size and self.font_size != args[0]:
+            raise ParseError('switching font size not yet supported')
+        self.font_size = args[0]
+        return ''
+
+    def V(self, args):
+        if args[0] % self.vert_motion != 0:
+            raise ParseError('can only move multiples of vert_motion')
+        newlines = '\n'*((args[0] // self.vert_motion) -
+            (self.line // self.vert_motion))
+        if len(newlines) != 0:
+            self.text_ptr = 0
+        self.line = args[0]
+        return newlines
+
+    def xX(self, args):
+        return ''
+
+    def xs(self, args):
+        return '\n'
+        raise StopIteration()
+
 class TextOutput(Outputter):
-    def __init__(self, fd):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.initial_typesetter = None
         self.resolution = None
         self.horiz_motion = None
@@ -361,9 +515,9 @@ class TextOutput(Outputter):
 
 if __name__ == '__main__':
     import sys
-    with open('wget_groff', 'rb') as fd:
-        for x in TextOutput(fd):
-            sys.stdout.write(x)
+    #with open('wget_groff', 'rb') as fd:
+    for x in HTMLOutput(sys.stdin.buffer):
+        sys.stdout.write(x)
         #print(''.join([x for x in Output(fd)]))
         #for thing in Output(fd):
         #    print(thing)
