@@ -13,9 +13,14 @@ CREATE TABLE locales(
     name TEXT
     );
 
+CREATE TABLE sections(
+    id INTEGER PRIMARY KEY,
+    section TEXT
+    );
+
 CREATE TABLE manpages(
     release INTEGER REFERENCES releases(id),
-    section INTEGER NOT NULL,
+    section INTEGER REFERENCES sections(id),
     package INTEGER REFERENCES packages(id),
     name TEXT NOT NULL,
     locale INTEGER REFERENCES locales(id),

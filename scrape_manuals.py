@@ -60,7 +60,8 @@ locale_re += '|'
 # so there is an extra .*? before the [.]gz to account for this junk
 MAN_REGEX = re.compile('(?P<locale>{0})/'
     'man(?P<section>[1-9])/'
-    '(?P<manpage>.+)[.](?P=section).*?[.]gz$'.format(locale_re))
+    '(?P<manpage>.+)[.]'
+    '(?P=section)(?P<extrasection>.*?)[.]gz$'.format(locale_re))
 
 SIMPLE_MAN_REGEX = re.compile('/man(?!ual)(?P<section>[^/]+)/'
             '(?P<manpage>.+)[.](?!Debian)(?P<section2>[^.]+?)[.]gz$', flags=re.I)
@@ -113,6 +114,7 @@ def main():
     release_cache = DBCache(conn.cursor(), 'releases', 'name')
     package_cache = DBCache(conn.cursor(), 'packages', 'name')
     locale_cache = DBCache(conn.cursor(), 'locales', 'name')
+    section_cache = DBCache(conn.cursor(), 'sections', 'section')
     for release, package in iter_packages():
         release_id = release_cache[release]
         package_id = package_cache[package['Package']]
@@ -135,7 +137,10 @@ def main():
                 logging.info('Simple regex matched line but fancy didn\'t: '
                     '{0}'.format(line))
             if matches:
-                section = int(matches.group('section'))
+                section = matches.group('section') + \
+                    matches.group('extrasection')
+                section_id = section_cache[section]
+
                 name = matches.group('manpage')
                 if matches.group('locale'):
                     # strip leading /
@@ -154,12 +159,12 @@ def main():
                     c.execute('INSERT INTO manpages '
                         '(release, section, package, name, path, version, '
                         'locale) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                        (release_id, section, package_id, name, path,
+                        (release_id, section_id, package_id, name, path,
                         package['Version'], locale_id))
                 except sqlite3.IntegrityError as e:
                     logging.error('Duplicate primary key: '
                         '(release: {0}, section: {1}, package: {2}, '
-                        'name: {3}, locale: {4})'.format(release, section,
+                        'name: {3}, locale: {4})'.format(release, section_id,
                         package['Package'], name, locale))
     conn.commit()
     conn.close()
