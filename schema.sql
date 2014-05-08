@@ -19,6 +19,7 @@ CREATE TABLE sections(
     );
 
 CREATE TABLE manpages(
+    id INTEGER PRIMARY KEY,
     release INTEGER REFERENCES releases(id),
     section INTEGER REFERENCES sections(id),
     package INTEGER REFERENCES packages(id),
@@ -26,8 +27,10 @@ CREATE TABLE manpages(
     locale INTEGER REFERENCES locales(id),
     path TEXT NOT NULL, -- can be a .deb or a troff file
     version TEXT NOT NULL,
-    PRIMARY KEY (release, section, package, name, locale)
+    UNIQUE (release, section, package, name, locale)
     );
+
+CREATE VIRTUAL TABLE aproposes USING fts4(apropos, tokenize=unicode61);
 
 -- used for the day-to-day querying
 CREATE INDEX manpages_release_section_name ON manpages (release, section, name);
