@@ -146,7 +146,6 @@ def get_apropos(contents, manpage, locale):
                 continue
         if decoded == None:
             # http://i.imgur.com/pekaDQI.gif
-            import pdb; pdb.set_trace()
             raise AproposException("None of the country's encodings worked")
         stdout = decoded
     else:
@@ -159,7 +158,6 @@ def get_apropos(contents, manpage, locale):
             continue
 
         if match.group('page') == manpage:
-            #logging.info((manpage, match.group('desc')))
             return match.group('desc')
     raise AproposException('Unable to find anything for page {0}'\
         .format(manpage))
