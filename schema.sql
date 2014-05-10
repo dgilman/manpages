@@ -32,5 +32,17 @@ CREATE TABLE manpages(
 
 CREATE VIRTUAL TABLE aproposes USING fts4(apropos, tokenize=unicode61);
 
+CREATE TABLE symlinks(
+    link_release INTEGER REFERENCES releases(id),
+    link_section INTEGER REFERENCES sections(id),
+    link_name TEXT NOT NULL,
+    link_locale INTEGER REFERENCES locales(id),
+
+    target_release INTEGER REFERENCES releases(id),
+    target_section INTEGER REFERENCES sections(id),
+    target_name TEXT NOT NULL,
+    target_locale INTEGER REFERENCES locales(id)
+    );
+
 -- used for the day-to-day querying
 CREATE INDEX manpages_release_section_name ON manpages (release, section, name);

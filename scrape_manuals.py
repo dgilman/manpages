@@ -4,6 +4,8 @@ import subprocess
 import re
 import sqlite3
 import logging
+import tarfile
+import tempfile
 
 logging.basicConfig(format='%(levelname)s:%(lineno)d:%(message)s',
     level=logging.INFO, filename='scraper.log')
@@ -162,24 +164,20 @@ def get_apropos(contents, manpage, locale):
     raise AproposException('Unable to find anything for page {0}'\
         .format(manpage))
 
-def iter_package_contents(package_path):
-    dpkg_deb_popen = subprocess.Popen(('dpkg-deb', '--fsys-tarfile',
-        package_path), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    tar_popen = subprocess.Popen(('tar', 'tf', '-'),
-        stdin=dpkg_deb_popen.stdout, stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL, universal_newlines=True)
-    dpkg_deb_popen.stdout.close() # allow for pushing a SIGPIPE upstream
-    for line in tar_popen.stdout:
-        yield line
+class CorruptArchiveException(Exception): pass
 
-def get_package_file(package_path, filename):
-    dpkg_deb_popen = subprocess.Popen(('dpkg-deb', '--fsys-tarfile',
-        package_path), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    tar_popen = subprocess.Popen(('tar', '-Oxf', '-', filename),
-        stdin=dpkg_deb_popen.stdout, stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL)
-    dpkg_deb_popen.stdout.close() # allow for pushing a SIGPIPE upstream
-    return tar_popen.communicate()[0]
+def get_tarfile(package_path):
+    # must use named file b/c of http://bugs.python.org/issue21044
+    tarfile_fd = tempfile.NamedTemporaryFile()
+    try:
+        dpkg_deb_popen = subprocess.check_call(('dpkg-deb', '--fsys-tarfile',
+            package_path), stdout=tarfile_fd)
+    except subprocess.CalledProcessError as e:
+        logging.error('Your mirror is corrupt!  Couldn\'t decompress {0}'\
+            .format(package_path))
+        raise CorruptArchiveException()
+    tarfile_fd.seek(0)
+    return tarfile.TarFile(fileobj=tarfile_fd)
 
 def iter_packages():
     for release in conf.RELEASES:
@@ -216,12 +214,16 @@ def main():
                 .format(package['Package'], package['Filename']))
             continue
 
-        for line in iter_package_contents(package_path):
-            match = MAN_REGEX.search(line)
-            simple_match = SIMPLE_MAN_REGEX.search(line)
+        try:
+            tarfile = get_tarfile(package_path)
+        except CorruptArchiveException:
+            continue
+        for tarinfo in tarfile:
+            match = MAN_REGEX.search(tarinfo.name)
+            simple_match = SIMPLE_MAN_REGEX.search(tarinfo.name)
             if simple_match and not match:
                 logging.info('Simple regex matched line but fancy didn\'t: '
-                    '{0}'.format(line))
+                    '{0} in {1}'.format(tarinfo.name, package_path))
             if not match:
                 continue
 
@@ -242,11 +244,47 @@ def main():
                 locale = 'DEFAULT_LOCALE'
             locale_id = locale_cache[locale]
 
-            contents = get_package_file(package_path, line.strip())
-            if len(contents) == 0:
-                logging.error('Didn\'t find {0} in {1}'.format(line.strip(),
+            if tarinfo.issym():
+                target = os.path.dirname(tarinfo.name)
+                target = target + '/' + tarinfo.linkname
+                target = './' + os.path.normpath(target)
+
+                target_match = MAN_REGEX.search(target)
+                if not target_match:
+                    logging.error('The symlink for {0} in {1} is really '
+                        'broken.'.format(tarinfo.name, package_path))
+                    continue
+
+                if target_match.group('locale'):
+                    target_locale = target_match.group('locale')[1:]
+                else:
+                    target_locale = 'DEFAULT_LOCALE'
+
+                c.execute("""INSERT INTO symlinks
+                (link_release, link_section, link_name, link_locale,
+                 target_release, target_section, target_name, target_locale)
+                VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (release_id, section_id, name, locale_id,
+                     release_id,
+                     section_cache[target_match.group('section') +
+                        target_match.group('extrasection')],
+                     target_match.group('manpage'),
+                     locale_cache[target_locale]))
+                continue
+
+            try:
+                contents = tarfile.extractfile(tarinfo.name)
+            except KeyError:
+                logging.error('Unable to find file {0} in {1}, possibly a '
+                    'symlink to something in another package.'\
+                    .format(tarinfo.name, package_path))
+                continue
+            if contents == None:
+                logging.error('Didn\'t find {0} in {1}'.format(tarinfo.name,
                     package_path))
                 continue
+            contents = contents.read()
 
             try:
                 apropos = get_apropos(contents, name, locale)
